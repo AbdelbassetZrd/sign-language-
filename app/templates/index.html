@@ -1,0 +1,196 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="recognition-page">
+    <header class="page-heading">
+        <div>
+            <span class="eyebrow">AI-powered recognition</span>
+            <h1>Sign to Text</h1>
+            <p>Turn sign language into clear, live text.</p>
+        </div>
+        <button type="button" class="voice-feature-button" id="signToVoiceButton">
+            <i class='bx bx-volume-full'></i>
+            <span>Sign to Voice</span>
+            <small>Preview feature</small>
+        </button>
+    </header>
+
+    <div class="row recognition-layout">
+        <!-- Video Feed Column -->
+        <div class="col-xl-8 mb-4">
+            <div class="card recognition-card camera-card">
+                <div class="card-header">
+                    <div>
+                        <span class="status-dot"></span>
+                        <h5 class="card-title mb-0">Live Camera</h5>
+                    </div>
+                </div>
+                <div class="card-body text-center">
+                    <div class="camera-frame">
+                        <img id="videoFeed" src="{{ url_for('video_feed') }}" class="img-fluid" alt="Live sign language camera feed">
+                    </div>
+                    <div class="recognition-controls">
+                        <button id="toggleBtn" class="btn btn-success" onclick="toggleRecognition()" disabled>
+                            <i class='bx bx-play-circle'></i> Loading...
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Predictions Column -->
+        <div class="col-xl-4 mb-4">
+            <div class="card recognition-card prediction-card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Recognition Results</h5>
+                    <span class="live-label">LIVE</span>
+                </div>
+                <div class="card-body">
+                    <div class="prediction-section">
+                        <h6>Recognized Sign</h6>
+                        <div id="currentPrediction" class="current-prediction">
+                            <span>Waiting...</span>
+                        </div>
+                    </div>
+
+                    <div class="top-predictions">
+                        <h6>Top 3 Predictions</h6>
+                        <div id="top3Predictions">
+                            <div class="prediction-item mb-3">
+                                <div class="prediction-meta">
+                                    <span><b>1</b> <span class="prediction-label">-</span></span>
+                                    <span class="confidence-badge">0%</span>
+                                </div>
+                                <div class="progress"><div class="progress-bar" style="width: 0%"></div></div>
+                            </div>
+                            <div class="prediction-item mb-3">
+                                <div class="prediction-meta">
+                                    <span><b>2</b> <span class="prediction-label">-</span></span>
+                                    <span class="confidence-badge">0%</span>
+                                </div>
+                                <div class="progress"><div class="progress-bar" style="width: 0%"></div></div>
+                            </div>
+                            <div class="prediction-item mb-3">
+                                <div class="prediction-meta">
+                                    <span><b>3</b> <span class="prediction-label">-</span></span>
+                                    <span class="confidence-badge">0%</span>
+                                </div>
+                                <div class="progress"><div class="progress-bar" style="width: 0%"></div></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card recognition-card tip-card">
+                <div class="card-body">
+                    <i class='bx bx-bulb'></i>
+                    <div>
+                        <h6>Recognition tip</h6>
+                        <p>Keep your hands visible and use a clear background.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let isRunning = false;
+    let predictionInterval;
+    let isToggling = false;
+
+    function updateButtonState() {
+        const btn = document.getElementById('toggleBtn');
+        btn.disabled = false;
+        if (isRunning) {
+            btn.innerHTML = '<i class="bx bx-stop-circle"></i> Stop Recognition';
+            btn.className = 'btn btn-danger';
+        } else {
+            btn.innerHTML = '<i class="bx bx-play-circle"></i> Start Recognition';
+            btn.className = 'btn btn-primary';
+        }
+    }
+
+    function toggleRecognition() {
+        if (isToggling) return;
+        isToggling = true;
+        const btn = document.getElementById('toggleBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bx bx-loader-alt bx-spin"></i> Processing...';
+        const action = isRunning ? 'stop' : 'start';
+
+        fetch('/toggle_recognition', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action })
+        }).then(response => response.json()).then(data => {
+            if (data.success) {
+                isRunning = !isRunning;
+                updateButtonState();
+                if (isRunning) startPredictionUpdates();
+                else stopPredictionUpdates();
+            } else {
+                alert(data.message || 'Failed to start camera');
+                updateButtonState();
+            }
+        }).catch(error => {
+            alert('Camera error: ' + error.message);
+            updateButtonState();
+        }).finally(() => { isToggling = false; });
+    }
+
+    function updatePredictions() {
+        fetch('/current_predictions').then(response => response.json()).then(data => {
+            const current = document.getElementById('currentPrediction');
+            if (data.status === 'waiting') {
+                current.innerHTML = '<span>Collecting frames...</span>';
+                updateTop3Display([]);
+            } else {
+                current.innerHTML = '<strong>' + data.current_prediction + '</strong>';
+                updateTop3Display(data.top3 || []);
+            }
+        }).catch(error => console.error(error));
+    }
+
+    function updateTop3Display(predictions) {
+        const items = document.querySelectorAll('#top3Predictions .prediction-item');
+        items.forEach((item, index) => {
+            const pred = predictions[index];
+            item.querySelector('.prediction-label').textContent = pred ? pred.label : '-';
+            item.querySelector('.confidence-badge').textContent = pred ? pred.confidence.toFixed(1) + '%' : '0%';
+            item.querySelector('.progress-bar').style.width = pred ? pred.confidence + '%' : '0%';
+        });
+    }
+
+    function startPredictionUpdates() {
+        predictionInterval = setInterval(updatePredictions, 500);
+        updatePredictions();
+    }
+
+    function stopPredictionUpdates() {
+        clearInterval(predictionInterval);
+        predictionInterval = null;
+        document.getElementById('currentPrediction').innerHTML = '<span>Stopped</span>';
+        updateTop3Display([]);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        fetch('/recognition_status').then(response => response.json()).then(data => {
+            isRunning = data.is_running;
+            updateButtonState();
+            if (isRunning) startPredictionUpdates();
+        }).catch(() => updateButtonState());
+
+        const voiceButton = document.getElementById('signToVoiceButton');
+        if (voiceButton) {
+            voiceButton.addEventListener('click', () => {
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('voiceDevelopmentModal')).show();
+            });
+        }
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (predictionInterval) clearInterval(predictionInterval);
+    });
+</script>
+{% endblock %}
